@@ -1,0 +1,29 @@
+# WAIter dependencies
+
+# Core
+gradio>=4.26.0
+langchain>=0.1.0
+langchain-openai>=0.0.5
+langchain-huggingface>=0.0.2
+langchain-text-splitters>=0.0.1
+langchain-core>=0.1.17
+
+# Language models
+openai>=1.10.0
+groq>=0.4.0
+
+# Vector store
+sentence-transformers>=2.2.2
+
+# Audio processing
+fastrtc>=0.6.0
+elevenlabs>=0.2.24
+numpy>=1.24.0
+
+# Database
+supabase>=2.0.0
+
+# Utilities
+python-dotenv>=1.0.0
+qrcode>=7.4.2
+pillow>=10.0.0
