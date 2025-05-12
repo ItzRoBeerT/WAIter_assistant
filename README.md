@@ -50,7 +50,7 @@ WAIter is an interactive voice-enabled chatbot designed for restaurant scenarios
 
 - `app.py` - Main application entry point with Gradio interface
 - `agent.py` - LangGraph agent implementation for restaurant assistant
-- `tools.py` - Custom tools for menu lookup, QR code generation, and kitchen orders
+- `tools.py` - Custom tools for menu lookup, and kitchen orders
 - `functions.py` - Helper functions for message handling
 - `supabase_client.py` - Client for database operations (if applicable)
 - `data/carta.md` - Restaurant menu data in Markdown format
