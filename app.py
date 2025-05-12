@@ -1,26 +1,47 @@
 import gradio as gr
 from langchain_openai import ChatOpenAI
-from os import getenv
+from os import getenv, environ
 from dotenv import load_dotenv
+import os
+
+# Configurar la variable de entorno para evitar advertencias de tokenizers (huggingface opcional)
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+ 
 from groq import AsyncClient 
-from fastrtc import WebRTC, ReplyOnPause, audio_to_bytes, get_tts_model, KokoroTTSOptions, AdditionalOutputs
+from fastrtc import WebRTC, ReplyOnPause, audio_to_bytes, AdditionalOutputs
 import numpy as np
 import asyncio 
+from elevenlabs.client import ElevenLabs
+from elevenlabs import VoiceSettings
+
+from langchain_text_splitters.markdown import MarkdownHeaderTextSplitter
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.vectorstores import InMemoryVectorStore
+from langchain_core.messages import HumanMessage, AIMessage
+
+from agent import RestaurantAgent
+# Importar las herramientas
+from tools import create_menu_info_tool, create_qr_code_tool, create_send_to_kitchen_tool
+
+from utils.logger import log_info, log_warn, log_error, log_success, log_debug
 
 load_dotenv()
 
 # Constantes
 RESTAURANT = "Bar paco"
-SYSTEM_PROMPT = {"role": "system", "content": "Responde como si fueras un camarero amigable, servicial y divertido."}
 
 # Clients
 groq_client = AsyncClient() 
+
+eleven_client = ElevenLabs(
+  api_key=getenv("ELEVENLABS_API_KEY"),
+)
 
 # LLM 
 llm = ChatOpenAI(
     openai_api_key=getenv("OPENROUTER_API_KEY"),
     openai_api_base=getenv("OPENROUTER_BASE_URL"),
-    model_name="google/gemini-2.0-flash-001", 
+    model_name="google/gemini-2.5-flash-preview", 
     model_kwargs={
         "extra_headers": {
             "Helicone-Auth": f"Bearer {getenv('HELICONE_API_KEY')}"
@@ -28,7 +49,43 @@ llm = ChatOpenAI(
     },
 )
 
-model_tts = get_tts_model("kokoro")
+# region RAG
+md_path = "data/carta.md"
+
+with open(md_path, "r", encoding="utf-8") as file:
+    md_content = file.read()
+
+splitter = MarkdownHeaderTextSplitter(
+    headers_to_split_on=[
+        ("#", "seccion_principal"),
+        ("##", "subseccion"),
+        ("###", "apartado")
+    ], 
+    strip_headers=False)
+splits = splitter.split_text(md_content)
+embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
+vector_store = InMemoryVectorStore.from_documents(splits, embeddings)
+
+retriever = vector_store.as_retriever(search_kwargs={"k": 3}) # Retrieve top 3 relevant documents
+# endregion
+
+# region TOOLS
+guest_info_tool = create_menu_info_tool(retriever)
+qr_code_tool = create_qr_code_tool()
+send_to_kitchen_tool = create_send_to_kitchen_tool(llm=llm)
+tools = [guest_info_tool, qr_code_tool, send_to_kitchen_tool]
+# endregion
+
+# region LANGGRAPH IMPLEMENTATION
+# Crear la instancia del agente de restaurante
+
+waiter_agent = RestaurantAgent(
+    llm=llm,
+    restaurant_name=RESTAURANT,
+    tools=tools
+)
+
+# endregion
 
 # region FUNCTIONS
 async def response(audio: tuple[int, np.ndarray], history = None): 
@@ -36,8 +93,8 @@ async def response(audio: tuple[int, np.ndarray], history = None):
 
     # Initialize history if None or not a list (robustness)
     current_history = history if isinstance(history, list) else []
-    print("-" * 20) # Separator for logs
-    print(f"Received audio, current history: {current_history}")
+    log_info("-" * 20) # Separator for logs
+    log_info(f"Received audio, current history: {current_history}")
 
     try:
         # 1. Get transcript from audio
@@ -50,59 +107,108 @@ async def response(audio: tuple[int, np.ndarray], history = None):
         )
         user_text = transcript.text.strip()
 
-        print(f"Transcription: '{user_text}'")
+        log_info(f"Transcription: '{user_text}'")
 
         # 2. Update history with user message
         user_message = {"role": "user", "content": user_text}
         history_with_user = current_history + [user_message]
 
         # 3. --- IMMEDIATE UI UPDATE ATTEMPT ---
-        print(f"Yielding user message update to UI: {history_with_user}")
+        log_info(f"Yielding user message update to UI: {history_with_user}")
         yield AdditionalOutputs(history_with_user)
         # --- Give event loop a chance to process the UI update ---
-        #await asyncio.sleep(0.01) # Small delay to yield control
+        await asyncio.sleep(0.01) # Small delay to yield control
 
-        # 4. Prepare prompt and messages for LLM
-        messages_for_llm = [SYSTEM_PROMPT] + history_with_user
-     
-        final_prompt = f"Eres un camarero para {RESTAURANT}. El cliente dice: {user_text},"+\
-        				"Debes generar el texto enfocado a un TTS para que pueda ser reproducido." +\
-                        "Evita usar comillas o signos de puntuación, no generes textos muy extensos y no uses emojis." 
+        # 4. Invocar al agente con la consulta del usuario
+        log_info("Iniciando procesamiento con LangGraph...")
         
-        messages_for_llm.append({"role": "user", "content": final_prompt}) 
+        # Invocar el agente con el texto de la consulta
+        langchain_messages = []
+        for msg in current_history:
+            if msg["role"] == "user":
+                langchain_messages.append(HumanMessage(content=msg["content"]))
+            elif msg["role"] == "assistant":
+                langchain_messages.append(AIMessage(content=msg["content"]))
+        # Add the current message
+        langchain_messages.append(HumanMessage(content=user_text))
 
-        print(f"Messages for LLM: {messages_for_llm}")
-
-        # 5. Get LLM response
-        llm_response = llm.invoke(messages_for_llm)
+        graph_result = waiter_agent.invoke(langchain_messages)
         
-        assistant_text = llm_response.content.strip()
-
+        log_debug(f"Resultado del agente: {graph_result}")
+        
+        # Extraer la respuesta del último mensaje del asistente
+        messages = graph_result.get("messages", [])
+        assistant_text = ""
+        
+        # Buscar el último mensaje del asistente
+        for msg in reversed(messages):
+            # LangChain puede devolver diferentes clases de mensajes
+            if hasattr(msg, "__class__") and msg.__class__.__name__ == "AIMessage":
+                assistant_text = msg.content
+                break
+        
         if not assistant_text:
-             print("LLM returned empty response.")
-             assistant_text = "Lo siento, no sé cómo responder a eso." 
+            log_warn("No se encontró respuesta del asistente en los mensajes.")
+            assistant_text = "Lo siento, no sé cómo responder a eso."
 
-        print(f"LLM response: '{assistant_text}'")
+        log_info(f"Assistant text: '{assistant_text}'")
 
-        # 6. Update history with assistant message
+        # 5. Update history with assistant message
         assistant_message = {"role": "assistant", "content": assistant_text}
         final_history = history_with_user + [assistant_message]
 
-        # 7. Convert text to speech
-        print("Generating TTS...")
-        options = KokoroTTSOptions(
-            voice="af_heart",
-            speed=1.0,
-            lang="es"
-        )
-   
-        tts_output = model_tts.tts(assistant_text, options=options)
-        print(f"TTS output: {tts_output}")
-        yield tts_output
+        # 6. Convert text to speech
+        log_info("Generating TTS...")
+        TARGET_SAMPLE_RATE = 24000 # <<< --- Tasa de muestreo deseada
+        tts_stream_generator = eleven_client.text_to_speech.convert(
+                text=assistant_text,
+                voice_id="Nh2zY9kknu6z4pZy6FhD",
+                model_id="eleven_flash_v2_5",
+                output_format="pcm_24000",
+                voice_settings=VoiceSettings(
+                    stability=0.0,
+                    similarity_boost=1.0, 
+                    style=0.0,
+                    use_speaker_boost=True,
+                    speed=1.0,
+                )
+            )
+        
+        # --- Procesar los chunks a medida que llegan ---
+        log_info("Receiving and processing TTS audio chunks...")
+        audio_chunks = []
+        total_bytes = 0
+
+        for chunk in tts_stream_generator:
+            total_bytes += len(chunk)
+            
+            # Convertir chunk actual de bytes PCM (int16) a float32 normalizado
+            if chunk:
+                audio_int16 = np.frombuffer(chunk, dtype=np.int16)
+                audio_float32 = audio_int16.astype(np.float32) / 32768.0
+                audio_float32 = np.clip(audio_float32, -1.0, 1.0)  # Asegurar rango
+                audio_chunks.append(audio_float32)
+
+        log_info(f"Received {total_bytes} bytes of TTS audio in total.")
+
+        # Concatenar todos los chunks procesados
+        if audio_chunks:
+            final_audio = np.concatenate(audio_chunks)
+            log_info(f"Processed {len(final_audio)} audio samples.")
+        else:
+            log_warn("Warning: TTS returned empty audio stream.")
+            final_audio = np.array([], dtype=np.float32)
+ 
+        # Crear la tupla final
+        tts_output_tuple = (TARGET_SAMPLE_RATE, final_audio)
+    
+        log_debug(f"TTS output: {tts_output_tuple}")   
+        log_success("Tarea completada con éxito.")
+        yield tts_output_tuple
         yield AdditionalOutputs(final_history) 
 	
     except Exception as e:
-        print(f"Error in response function: {e}")
+        log_error(f"Error in response function: {e}")
         import traceback
         traceback.print_exc()
         # Yield empty audio and current history in case of error
@@ -132,7 +238,7 @@ with gr.Blocks() as demo:
 
     # Event: When audio stream data arrives (managed by ReplyOnPause)
     audio.stream(
-        fn=ReplyOnPause(response), 
+        fn=ReplyOnPause(response, can_interrupt=True), 
         inputs=[audio, chatbot], 
         outputs=[audio], 
     )
