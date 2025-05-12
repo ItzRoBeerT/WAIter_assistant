@@ -21,7 +21,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 from agent import RestaurantAgent
 # Importar las herramientas
-from tools import create_menu_info_tool, create_qr_code_tool, create_send_to_kitchen_tool
+from tools import create_menu_info_tool, create_send_to_kitchen_tool
 
 from utils.logger import log_info, log_warn, log_error, log_success, log_debug
 
@@ -71,9 +71,8 @@ retriever = vector_store.as_retriever(search_kwargs={"k": 3}) # Retrieve top 3 r
 
 # region TOOLS
 guest_info_tool = create_menu_info_tool(retriever)
-qr_code_tool = create_qr_code_tool()
 send_to_kitchen_tool = create_send_to_kitchen_tool(llm=llm)
-tools = [guest_info_tool, qr_code_tool, send_to_kitchen_tool]
+tools = [guest_info_tool, send_to_kitchen_tool]
 # endregion
 
 # region LANGGRAPH IMPLEMENTATION

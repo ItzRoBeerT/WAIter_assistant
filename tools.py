@@ -52,25 +52,6 @@ def create_menu_info_tool(retriever: VectorStoreRetriever) -> Tool:
         func=extract_text,
     )
 
-def create_qr_code_tool() -> Tool:
-    """
-    Crea una herramienta para generar códigos QR del menú.
-    
-    Returns:
-        Una herramienta de LangChain para generar códigos QR
-    """
-    def get_qr_code(query: str) -> str:
-        """Genera un código QR para el menú del restaurante."""
-        # Placeholder para la lógica de generación de QR
-        log_debug(f"QR QUERY - - -  {query}")
-        return "QR code generated."
-    
-    return Tool(
-        name="qr_code_tool",
-        description="Genera un código QR para que el cliente pueda acceder al menú completo desde su dispositivo. Usa esta herramienta cuando el cliente solicite ver el menú en su móvil.",
-        func=get_qr_code,
-    )
-
 def create_send_to_kitchen_tool(llm: ChatOpenAI) -> Tool:
     """
     Crea una herramienta para enviar pedidos a la cocina.
@@ -229,21 +210,3 @@ def create_send_to_kitchen_tool(llm: ChatOpenAI) -> Tool:
         """,
         func=send_to_kitchen,
     )
-def create_tools(retriever: Optional[VectorStoreRetriever] = None) -> list[Tool]:
-    """
-    Crea todas las herramientas necesarias para el agente del restaurante.
-    
-    Args:
-        retriever: Un retriever para buscar en la base de conocimiento del menú
-        
-    Returns:
-        Lista de herramientas para el agente
-    """
-    tools = []
-    
-    if retriever:
-        tools.append(create_menu_info_tool(retriever))
-    
-    tools.append(create_qr_code_tool())
-    
-    return tools
