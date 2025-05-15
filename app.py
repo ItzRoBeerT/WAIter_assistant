@@ -66,7 +66,7 @@ splits = splitter.split_text(md_content)
 embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
 vector_store = InMemoryVectorStore.from_documents(splits, embeddings)
 
-retriever = vector_store.as_retriever(search_kwargs={"k": 3}) # Retrieve top 3 relevant documents
+retriever = vector_store.as_retriever(search_kwargs={"k": 3})
 # endregion
 
 # region TOOLS
@@ -77,48 +77,27 @@ tools = [guest_info_tool, send_to_kitchen_tool]
 
 # region LANGGRAPH IMPLEMENTATION
 # Crear la instancia del agente de restaurante
-
 waiter_agent = RestaurantAgent(
     llm=llm,
     restaurant_name=RESTAURANT,
     tools=tools
 )
-
 # endregion
 
 # region FUNCTIONS
-async def response(audio: tuple[int, np.ndarray], history = None): 
-    """Handles audio input, generates response, yields UI updates and audio."""
-
-    # Initialize history if None or not a list (robustness)
+async def handle_text_input(message, history):
+    """Handles text input, generates response, updates chat history."""
+    
     current_history = history if isinstance(history, list) else []
-    log_info("-" * 20) # Separator for logs
-    log_info(f"Received audio, current history: {current_history}")
+    log_info("-" * 20) 
+    log_info(f"Received text input: '{message}', current history: {current_history}")
 
     try:
-        # 1. Get transcript from audio
-        # Ensure audio_to_bytes handles the input format correctly
-        audio_bytes = audio_to_bytes(audio)
-        transcript = await groq_client.audio.transcriptions.create(
-            file=("audio-file.mp3", audio_bytes),
-            model="whisper-large-v3-turbo",
-            response_format="verbose_json",
-        )
-        user_text = transcript.text.strip()
-
-        log_info(f"Transcription: '{user_text}'")
-
-        # 2. Update history with user message
-        user_message = {"role": "user", "content": user_text}
+        # 1. Actualizar el historial con el mensaje del usuario
+        user_message = {"role": "user", "content": message}
         history_with_user = current_history + [user_message]
 
-        # 3. --- IMMEDIATE UI UPDATE ATTEMPT ---
-        log_info(f"Yielding user message update to UI: {history_with_user}")
-        yield AdditionalOutputs(history_with_user)
-        # --- Give event loop a chance to process the UI update ---
-        await asyncio.sleep(0.01) # Small delay to yield control
-
-        # 4. Invocar al agente con la consulta del usuario
+        # 2. Invocar al agente con la consulta del usuario
         log_info("Iniciando procesamiento con LangGraph...")
         
         # Invocar el agente con el texto de la consulta
@@ -128,18 +107,17 @@ async def response(audio: tuple[int, np.ndarray], history = None):
                 langchain_messages.append(HumanMessage(content=msg["content"]))
             elif msg["role"] == "assistant":
                 langchain_messages.append(AIMessage(content=msg["content"]))
-        # Add the current message
-        langchain_messages.append(HumanMessage(content=user_text))
+    
+        langchain_messages.append(HumanMessage(content=message))
 
         graph_result = waiter_agent.invoke(langchain_messages)
         
         log_debug(f"Resultado del agente: {graph_result}")
         
-        # Extraer la respuesta del último mensaje del asistente
+       
         messages = graph_result.get("messages", [])
         assistant_text = ""
         
-        # Buscar el último mensaje del asistente
         for msg in reversed(messages):
             # LangChain puede devolver diferentes clases de mensajes
             if hasattr(msg, "__class__") and msg.__class__.__name__ == "AIMessage":
@@ -152,11 +130,83 @@ async def response(audio: tuple[int, np.ndarray], history = None):
 
         log_info(f"Assistant text: '{assistant_text}'")
 
-        # 5. Update history with assistant message
+        # 3. Actualizar el historial con el mensaje del asistente
+        assistant_message = {"role": "assistant", "content": assistant_text}
+        final_history = history_with_user + [assistant_message]
+        
+        log_success("Tarea completada con éxito.")
+        return final_history
+
+    except Exception as e:
+        log_error(f"Error in handle_text_input function: {e}")
+        import traceback
+        traceback.print_exc()
+        return current_history
+    
+async def response(audio: tuple[int, np.ndarray], history = None): 
+    """Handles audio input, generates response, yields UI updates and audio."""
+
+    current_history = history if isinstance(history, list) else []
+    log_info("-" * 20)
+    log_info(f"Received audio, current history: {current_history}")
+
+    try:
+        # 1. Transcribir el audio a texto
+        audio_bytes = audio_to_bytes(audio)
+        transcript = await groq_client.audio.transcriptions.create(
+            file=("audio-file.mp3", audio_bytes),
+            model="whisper-large-v3-turbo",
+            response_format="verbose_json",
+        )
+        user_text = transcript.text.strip()
+
+        log_info(f"Transcription: '{user_text}'")
+
+        # 2. Actualizar el historial con el mensaje del usuario
+        user_message = {"role": "user", "content": user_text}
+        history_with_user = current_history + [user_message]
+
+        log_info(f"Yielding user message update to UI: {history_with_user}")
+        yield AdditionalOutputs(history_with_user)
+        await asyncio.sleep(0.01) # Permite que la UI se actualice antes de continuar
+
+        # 4. Invocar al agente con la consulta del usuario
+        log_info("Iniciando procesamiento con LangGraph...")
+        
+        langchain_messages = []
+        for msg in current_history:
+            if msg["role"] == "user":
+                langchain_messages.append(HumanMessage(content=msg["content"]))
+            elif msg["role"] == "assistant":
+                langchain_messages.append(AIMessage(content=msg["content"]))
+
+        langchain_messages.append(HumanMessage(content=user_text))
+
+        graph_result = waiter_agent.invoke(langchain_messages)
+        
+        log_debug(f"Resultado del agente: {graph_result}")
+        
+        # Extraer la respuesta del último mensaje del asistente
+        messages = graph_result.get("messages", [])
+        assistant_text = ""
+        
+        # Buscar el último mensaje del asistente
+        for msg in reversed(messages):
+            if hasattr(msg, "__class__") and msg.__class__.__name__ == "AIMessage":
+                assistant_text = msg.content
+                break
+        
+        if not assistant_text:
+            log_warn("No se encontró respuesta del asistente en los mensajes.")
+            assistant_text = "Lo siento, no sé cómo responder a eso."
+
+        log_info(f"Assistant text: '{assistant_text}'")
+
+        # 5. Actualizar el historial con el mensaje del asistente
         assistant_message = {"role": "assistant", "content": assistant_text}
         final_history = history_with_user + [assistant_message]
 
-        # 6. Convert text to speech
+        # 6. Generar la respuesta de voz
         log_info("Generating TTS...")
         TARGET_SAMPLE_RATE = 24000 # <<< --- Tasa de muestreo deseada
         tts_stream_generator = eleven_client.text_to_speech.convert(
@@ -210,7 +260,7 @@ async def response(audio: tuple[int, np.ndarray], history = None):
         log_error(f"Error in response function: {e}")
         import traceback
         traceback.print_exc()
-        # Yield empty audio and current history in case of error
+      
         yield np.array([]).astype(np.int16).tobytes()
         yield AdditionalOutputs(current_history)
 
@@ -229,23 +279,41 @@ with gr.Blocks() as demo:
     )
 
     with gr.Row():
+        text_input = gr.Textbox(
+            label="Type your message",
+            placeholder="Type here and press Enter...",
+            show_label=True,
+        )
         audio = WebRTC(
             label="Speak Here",
             mode="send-receive", 
             modality="audio",
         )
+    
+    text_input.submit(
+        fn=handle_text_input,
+        inputs=[text_input, chatbot],
+        outputs=[chatbot],
+        api_name="submit_text"
+    ).then(
+        fn=lambda: "",  # Limpiar el campo de texto
+        outputs=[text_input]
+    )
 
-    # Event: When audio stream data arrives (managed by ReplyOnPause)
+    # Se encarga de manejar la entrada de audio
     audio.stream(
-        fn=ReplyOnPause(response, can_interrupt=True), 
+        fn=ReplyOnPause(
+            response, 
+            can_interrupt=True,
+        ), 
         inputs=[audio, chatbot], 
         outputs=[audio], 
     )
 
-    # Event: Handle AdditionalOutputs yielded by the response function
+    # Actualiza el historial de la conversación
     audio.on_additional_outputs(
-        fn=lambda history_update: history_update, # Pass the yielded history directly
-        outputs=[chatbot], # Update the chatbot component
+        fn=lambda history_update: history_update, # Envia el historial actualizado 
+        outputs=[chatbot], # Actualiza el chatbot 
     )
 
 if __name__ == "__main__":
