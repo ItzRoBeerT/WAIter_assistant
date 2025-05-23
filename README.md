@@ -1,72 +1,99 @@
 # 🧑‍🍳 WAIter: Voice Chatbot for Restaurants
 
-WAIter is an interactive voice-enabled chatbot designed for restaurant scenarios. It simulates a friendly and helpful waiter who can answer customers' spoken questions in real time — using speech-to-text, LLMs for conversation, and TTS for spoken responses.
+WAIter es un chatbot interactivo con capacidades de voz diseñado para escenarios de restaurantes. Simula un camarero amigable y servicial que puede responder a las preguntas habladas de los clientes en tiempo real, utilizando tecnologías de reconocimiento de voz, modelos de lenguaje avanzados y síntesis de voz natural.
 
-## 🛠️ Technical Stack
+## 🛠️ Stack Tecnológico
 
-- **Voice Processing**:
-  - 🎙️ [FastRTC](https://fastrtc.org) for real-time audio streaming
-  - 🔊 [ElevenLabs](https://elevenlabs.io/) for expressive Text-to-Speech
-  - 🗣️ [Whisper](https://openai.com/research/whisper) (via Groq) for speech recognition
+- **Procesamiento de Voz**:
+  - 🎙️ [FastRTC](https://fastrtc.org) para streaming de audio en tiempo real
+  - 🔊 [ElevenLabs](https://elevenlabs.io/) para síntesis de voz expresiva (TTS)
+  - 🗣️ [Whisper](https://openai.com/research/whisper) (vía Groq) para reconocimiento de voz
 
-- **Language AI**:
-  - 💬 [LangChain](https://www.langchain.com/) for LLM orchestration
-  - 🔄 [LangGraph](https://github.com/langchain-ai/langgraph) for agent workflows
-  - 🧠 [Gemini 2.5](https://deepmind.google/technologies/gemini/) (via OpenRouter) for natural language processing
+- **Inteligencia Artificial de Lenguaje**:
+  - 💬 [LangChain](https://www.langchain.com/) para orquestación de LLMs
+  - 🔄 [LangGraph](https://github.com/langchain-ai/langgraph) para flujos de trabajo de agentes
+  - 🧠 [Gemini 2.5](https://deepmind.google/technologies/gemini/) (vía OpenRouter) para procesamiento de lenguaje natural
 
-- **Data Management**:
-  - 🔍 Vector embeddings (HuggingFace) for menu information retrieval
-  - 💾 Menu data stored in Markdown format
+- **Gestión de Datos**:
+  - 🔍 Embeddings vectoriales con HuggingFace (BAAI/bge-m3)
+  - 💾 Datos de menú almacenados en formato Markdown
+  - 🗄️ [Supabase](https://supabase.com/) para almacenamiento y procesamiento de pedidos
 
-- **Interface**:
-  - 🧪 [Gradio](https://www.gradio.app/) for the interactive web interface
+- **Interfaz**:
+  - 🧪 [Gradio](https://www.gradio.app/) para la interfaz web interactiva
 
-## 🚀 Features
+## 🚀 Características
 
-- **Real-time voice interaction** with a virtual waiter assistant
-- **Menu information retrieval** with context-aware answers about dishes, prices and options
-- **Order processing** with ability to send orders directly to kitchen systems
-- **Natural conversational flow** using LangGraph for complex agent orchestration
-- **Knowledge-base integration** with RAG (Retrieval Augmented Generation)
-- **Multi-turn conversation memory** for context-aware responses
+- **Interacción por voz en tiempo real** con un asistente virtual de camarero
+- **Consulta de información del menú** con respuestas contextuales sobre platos, precios y opciones
+- **Procesamiento de pedidos** con capacidad para enviar órdenes directamente a sistemas de cocina
+- **Flujo conversacional natural** usando LangGraph para orquestación compleja de agentes
+- **Integración de base de conocimientos** con RAG (Retrieval Augmented Generation)
+- **Memoria de conversación multi-turno** para respuestas contextuales
+- **Gestión de pedidos** con almacenamiento en Supabase y sistema de seguimiento
+- **Síntesis de voz expresiva** con ElevenLabs para respuestas naturales y fluidas
 
-## 🚀 Getting Started
+## 🚀 Primeros Pasos
 
-1. Clone this repository
-2. Install dependencies: `pip install -r requirements.txt` (ensure you have Python 3.10+)
-3. Create a `.env` file with your API keys:
+1. Clona este repositorio
+2. Instala las dependencias: `pip install -r requirements.txt` (requiere Python 3.10+)
+3. Crea un archivo `.env` con tus claves API:
    ```
-   OPENROUTER_API_KEY=your_openrouter_key
+   OPENROUTER_API_KEY=tu_clave_openrouter
    OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-   ELEVENLABS_API_KEY=your_elevenlabs_key
-   HELICONE_API_KEY=your_helicone_key_optional
-   SUPABASE_URL=your_supabase_url
-   SUPABASE_KEY=your_supabase_key
+   GROQ_API_KEY=tu_clave_groq
+   ELEVENLABS_API_KEY=tu_clave_elevenlabs
+   HELICONE_API_KEY=tu_clave_helicone_opcional
+   SUPABASE_URL=tu_url_supabase
+   SUPABASE_KEY=tu_clave_supabase
    ```
-4. Run the application: `python app.py`
-5. Open the Gradio interface in your browser
+4. Ejecuta la aplicación: `python app.py`
+5. Abre la interfaz de Gradio en tu navegador
 
-## 🗂️ Project Structure
+## 🗂️ Estructura del Proyecto
 
-- `app.py` - Main application entry point with Gradio interface
-- `agent.py` - LangGraph agent implementation for restaurant assistant
-- `tools.py` - Custom tools for menu lookup, and kitchen orders
-- `functions.py` - Helper functions for message handling
-- `supabase_client.py` - Client for database operations (if applicable)
-- `data/carta.md` - Restaurant menu data in Markdown format
-- `utils/` - Utility modules for logging and data classes
+- `app.py` - Punto de entrada principal con interfaz Gradio
+- `agent.py` - Implementación del agente LangGraph para asistente de restaurante
+- `model.py` - Gestor para la creación y configuración de modelos de lenguaje
+- `tools.py` - Herramientas personalizadas para consulta de menú y envío de pedidos
+- `supabase_client.py` - Cliente para operaciones con la base de datos Supabase
+- `data/carta.md` - Datos del menú del restaurante en formato Markdown
+- `utils/` - Módulos de utilidad:
+  - `functions.py` - Funciones auxiliares para manejo de mensajes y modelos
+  - `logger.py` - Sistema de registro con colores para depuración
+  - `classes.py` - Clases de datos como `Order` para representar pedidos
 
-## 🧠 How It Works
+## 🧠 Cómo Funciona
 
-1. **Speech Recognition**: FastRTC captures audio from the user's microphone and sends it to Groq's Whisper API for transcription
-2. **Natural Language Understanding**: Transcribed text is passed to the LangGraph agent
-3. **RAG Processing**: The agent uses vector search to find relevant menu information
-4. **Response Generation**: Gemini 2.5 generates a contextual, helpful response
-5. **Text-to-Speech**: ElevenLabs converts the text response to natural-sounding speech
-6. **Web Interface**: Gradio renders the conversation and plays the audio response
+1. **Reconocimiento de Voz**: FastRTC captura audio del micrófono del usuario y lo envía a la API Whisper de Groq para transcripción
+2. **Procesamiento de Lenguaje Natural**: El texto transcrito se pasa al agente LangGraph
+3. **Procesamiento RAG**: El agente utiliza búsqueda vectorial para encontrar información relevante del menú
+4. **Herramientas del Agente**: El sistema utiliza herramientas especializadas para:
+   - Búsqueda de información en el menú (vectores)
+   - Envío de pedidos a cocina (integración Supabase)
+5. **Generación de Respuesta**: Gemini 2.5 (a través de OpenRouter) genera una respuesta contextual y útil
+6. **Síntesis de Voz**: ElevenLabs convierte la respuesta de texto a voz natural
+7. **Interfaz Web**: Gradio renderiza la conversación y reproduce la respuesta de audio
 
-## 📝 License
+## 📦 Requisitos del Sistema
+
+Los requisitos detallados se encuentran en el archivo `requirements.txt`. Las principales dependencias incluyen:
+
+- Python 3.10+
+- gradio >= 4.26.0
+- langchain >= 0.1.0 (con varios componentes adicionales)
+- fastrtc >= 0.6.0
+- elevenlabs >= 0.2.24
+- groq >= 0.4.0
+- supabase >= 2.0.0
+- sentence-transformers >= 2.2.2
+
+## 📝 Licencia
 
 [MIT License](LICENSE)
+
+---
+
+🌐 Desarrollado por Roberto - 2024
 
 
