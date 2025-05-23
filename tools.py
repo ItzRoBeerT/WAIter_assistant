@@ -10,7 +10,12 @@ from utils.classes import Order
 
 from supabase_client import SupabaseOrderManager
 import asyncio
-supabase = SupabaseOrderManager()
+
+try:
+    supabase = SupabaseOrderManager()
+except Exception as e:
+    log_error(f"Error al inicializar el cliente de Supabase: {e}")
+    supabase = None
 
 
 def create_menu_info_tool(retriever: VectorStoreRetriever) -> Tool:
@@ -47,10 +52,19 @@ def create_menu_info_tool(retriever: VectorStoreRetriever) -> Tool:
             return "Lo siento, no tengo información sobre eso."
     
     return Tool(
-        name="guest_info_tool",
-        description="Busca información específica en el menú del restaurante sobre platos, precios, ingredientes o secciones. Usa esta herramienta para consultas relacionadas con la carta.",
-        func=extract_text,
-    )
+    name="guest_info_tool",
+    description="""Herramienta para consultar información detallada del menú del restaurante.
+        Úsala cuando necesites:
+        - Buscar platos específicos y verificar su disponibilidad
+        - Consultar precios exactos de productos
+        - Obtener información sobre ingredientes, alérgenos o composición de platos
+        - Explorar secciones del menú (entrantes, principales, postres, bebidas, etc.)
+        - Verificar la existencia de productos antes de recomendarlos
+        - Responder preguntas específicas sobre la carta del restaurante
+        
+        Esta herramienta accede al contenido completo del menú para proporcionar información precisa y actualizada.""",
+    func=extract_text,
+)
 
 def create_send_to_kitchen_tool(llm: ChatOpenAI) -> Tool:
     """

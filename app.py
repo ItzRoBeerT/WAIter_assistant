@@ -1,9 +1,9 @@
 import gradio as gr
-from langchain_openai import ChatOpenAI
 from os import getenv, environ
 from dotenv import load_dotenv
 import os
-
+from model import ModelManager
+from utils.functions import fetch_openrouter_models
 # Configurar la variable de entorno para evitar advertencias de tokenizers (huggingface opcional)
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
  
@@ -30,24 +30,11 @@ load_dotenv()
 # Constantes
 RESTAURANT = "Bar paco"
 
-# Clients
-groq_client = AsyncClient() 
-
-eleven_client = ElevenLabs(
-  api_key=getenv("ELEVENLABS_API_KEY"),
-)
-
-# LLM 
-llm = ChatOpenAI(
-    openai_api_key=getenv("OPENROUTER_API_KEY"),
-    openai_api_base=getenv("OPENROUTER_BASE_URL"),
-    model_name="google/gemini-2.5-flash-preview", 
-    model_kwargs={
-        "extra_headers": {
-            "Helicone-Auth": f"Bearer {getenv('HELICONE_API_KEY')}"
-        }
-    },
-)
+# Initialize clients and models to None, will be set during runtime
+groq_client = None
+eleven_client = None
+llm = None
+waiter_agent = None
 
 # region RAG
 md_path = "data/carta.md"
@@ -63,30 +50,76 @@ splitter = MarkdownHeaderTextSplitter(
     ], 
     strip_headers=False)
 splits = splitter.split_text(md_content)
-embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
+embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3", model_kwargs = {'device': 'cpu'})
 vector_store = InMemoryVectorStore.from_documents(splits, embeddings)
 
-retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+retriever = vector_store.as_retriever(search_kwargs={"k": 4})
 # endregion
 
-# region TOOLS
-guest_info_tool = create_menu_info_tool(retriever)
-send_to_kitchen_tool = create_send_to_kitchen_tool(llm=llm)
-tools = [guest_info_tool, send_to_kitchen_tool]
-# endregion
+# Initialize tools to None
+guest_info_tool = None
+send_to_kitchen_tool = None
+tools = None
 
-# region LANGGRAPH IMPLEMENTATION
-# Crear la instancia del agente de restaurante
-waiter_agent = RestaurantAgent(
-    llm=llm,
-    restaurant_name=RESTAURANT,
-    tools=tools
-)
-# endregion
+# Function to initialize all components with provided API keys
+def initialize_components(openrouter_key, groq_key, elevenlabs_key, model_name):
+    global groq_client, eleven_client, llm, waiter_agent, guest_info_tool, send_to_kitchen_tool, tools
+    
+    log_info("Initializing components with provided API keys...")
+    
+    # Initialize clients with provided keys
+    if groq_key:
+        groq_client = AsyncClient(api_key=groq_key)
+    
+    if elevenlabs_key:
+        eleven_client = ElevenLabs(api_key=elevenlabs_key)
+    
+    if openrouter_key:
+        # Initialize LLM
+        model_manager = ModelManager(
+            api_key=openrouter_key,
+            api_base=getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+            model_name=model_name,
+            helicone_api_key=getenv("HELICONE_API_KEY", "")
+        )
+        llm = model_manager.create_model()
+        
+        # Initialize tools
+        guest_info_tool = create_menu_info_tool(retriever)
+        send_to_kitchen_tool = create_send_to_kitchen_tool(llm=llm)
+        tools = [guest_info_tool, send_to_kitchen_tool]
+        
+        # Initialize the agent
+        waiter_agent = RestaurantAgent(
+            llm=llm,
+            restaurant_name=RESTAURANT,
+            tools=tools
+        )
+        
+        log_success("Components initialized successfully.")
+    else:
+        log_warn("OpenRouter API key is required for LLM initialization.")
+    
+    return {
+        "groq_client": groq_client is not None,
+        "eleven_client": eleven_client is not None,
+        "llm": llm is not None,
+        "agent": waiter_agent is not None
+    }
 
 # region FUNCTIONS
-async def handle_text_input(message, history):
+async def handle_text_input(message, history, openrouter_key, groq_key, elevenlabs_key, model_name):
     """Handles text input, generates response, updates chat history."""
+    global waiter_agent, llm
+    
+    # Initialize components if needed
+    if waiter_agent is None or llm is None or model_name != getattr(llm, "model_name", ""):
+        status = initialize_components(openrouter_key, groq_key, elevenlabs_key, model_name)
+        if not status["agent"]:
+            return history + [
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": "Error: Could not initialize the agent. Please check your API keys."}
+            ]
     
     current_history = history if isinstance(history, list) else []
     log_info("-" * 20) 
@@ -114,7 +147,6 @@ async def handle_text_input(message, history):
         
         log_debug(f"Resultado del agente: {graph_result}")
         
-       
         messages = graph_result.get("messages", [])
         assistant_text = ""
         
@@ -141,10 +173,27 @@ async def handle_text_input(message, history):
         log_error(f"Error in handle_text_input function: {e}")
         import traceback
         traceback.print_exc()
-        return current_history
+        return current_history + [
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": f"Error: {str(e)}"}
+        ]
     
-async def response(audio: tuple[int, np.ndarray], history = None): 
+async def response(audio: tuple[int, np.ndarray], history, openrouter_key, groq_key, elevenlabs_key, model_name): 
     """Handles audio input, generates response, yields UI updates and audio."""
+    global waiter_agent, llm, groq_client, eleven_client
+    
+    # Initialize components if needed
+    if waiter_agent is None or llm is None or groq_client is None or eleven_client is None or model_name != getattr(llm, "model_name", ""):
+        status = initialize_components(openrouter_key, groq_key, elevenlabs_key, model_name)
+        if not status["groq_client"]:
+            yield AdditionalOutputs(history + [{"role": "assistant", "content": "Error: Groq API key is required for audio processing."}])
+            return
+        if not status["eleven_client"]:
+            yield AdditionalOutputs(history + [{"role": "assistant", "content": "Error: ElevenLabs API key is required for audio processing."}])
+            return
+        if not status["agent"]:
+            yield AdditionalOutputs(history + [{"role": "assistant", "content": "Error: Could not initialize the agent. Please check your OpenRouter API key."}])
+            return
 
     current_history = history if isinstance(history, list) else []
     log_info("-" * 20)
@@ -168,7 +217,7 @@ async def response(audio: tuple[int, np.ndarray], history = None):
 
         log_info(f"Yielding user message update to UI: {history_with_user}")
         yield AdditionalOutputs(history_with_user)
-        await asyncio.sleep(0.01) # Permite que la UI se actualice antes de continuar
+        await asyncio.sleep(0.04) # Permite que la UI se actualice antes de continuar
 
         # 4. Invocar al agente con la consulta del usuario
         log_info("Iniciando procesamiento con LangGraph...")
@@ -219,7 +268,7 @@ async def response(audio: tuple[int, np.ndarray], history = None):
                     similarity_boost=1.0, 
                     style=0.0,
                     use_speaker_boost=True,
-                    speed=1.0,
+                    speed=1.1,
                 )
             )
         
@@ -255,19 +304,49 @@ async def response(audio: tuple[int, np.ndarray], history = None):
         log_success("Tarea completada con éxito.")
         yield tts_output_tuple
         yield AdditionalOutputs(final_history) 
-	
+    
     except Exception as e:
         log_error(f"Error in response function: {e}")
         import traceback
         traceback.print_exc()
       
         yield np.array([]).astype(np.int16).tobytes()
-        yield AdditionalOutputs(current_history)
+        yield AdditionalOutputs(current_history + [{"role": "assistant", "content": f"Error: {str(e)}"}])
 
+def load_model_ids():
+    # Use asyncio to run the async function
+    try:
+        models = asyncio.run(fetch_openrouter_models())
+        # Extract model IDs and names
+        model_ids = [model["id"] for model in models]
+        return model_ids
+    except Exception as e:
+        log_error(f"Error loading model IDs: {e}")
+        return ["openai/gpt-4o-mini", "google/gemini-2.5-flash-preview", "anthropic/claude-3-5-sonnet"]  # Fallback models
 # endregion
 
 with gr.Blocks() as demo:
     gr.Markdown("# WAIter Chatbot")
+    with gr.Row():
+        text_openrouter_api_key = gr.Textbox(
+            label="OpenRouter API Key (required)",
+            placeholder="Enter your OpenRouter API key",
+            value=getenv("OPENROUTER_API_KEY") or "",
+            type="password",
+        )
+        text_groq_api_key = gr.Textbox(
+            label="Groq API Key (required for audio)",
+            placeholder="Enter your Groq API key",
+            value=getenv("GROQ_API_KEY") or "",
+            type="password",
+        )
+        text_elevenlabs_api_key = gr.Textbox(
+            label="Elevenlabs API Key (required for audio)",
+            placeholder="Enter your Elevenlabs API key",
+            value=getenv("ELEVENLABS_API_KEY") or "",
+            type="password",
+        )
+        
     chatbot = gr.Chatbot(
         label="Agent",
         type="messages",
@@ -279,11 +358,19 @@ with gr.Blocks() as demo:
     )
 
     with gr.Row():
+        model_dropdown = gr.Dropdown(
+            label="Select Model",
+            choices=load_model_ids(),
+            value=getenv("MODEL") or "openai/gpt-4o-mini",
+            interactive=True
+        )
+
         text_input = gr.Textbox(
             label="Type your message",
             placeholder="Type here and press Enter...",
             show_label=True,
         )
+
         audio = WebRTC(
             label="Speak Here",
             mode="send-receive", 
@@ -292,7 +379,14 @@ with gr.Blocks() as demo:
     
     text_input.submit(
         fn=handle_text_input,
-        inputs=[text_input, chatbot],
+        inputs=[
+            text_input, 
+            chatbot, 
+            text_openrouter_api_key, 
+            text_groq_api_key, 
+            text_elevenlabs_api_key,
+            model_dropdown
+        ],
         outputs=[chatbot],
         api_name="submit_text"
     ).then(
@@ -306,7 +400,7 @@ with gr.Blocks() as demo:
             response, 
             can_interrupt=True,
         ), 
-        inputs=[audio, chatbot], 
+        inputs=[audio, chatbot, text_openrouter_api_key, text_groq_api_key, text_elevenlabs_api_key, model_dropdown], 
         outputs=[audio], 
     )
 
