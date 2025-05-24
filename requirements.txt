@@ -17,7 +17,7 @@ groq>=0.4.0
 sentence-transformers>=2.2.2
 
 # Audio processing
-fastrtc>=0.0.25
+fastrtc[vad]>=0.0.25
 elevenlabs>=0.2.24
 numpy>=1.24.0
 
