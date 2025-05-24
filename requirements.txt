@@ -7,6 +7,7 @@ langchain-openai>=0.0.5
 langchain-huggingface>=0.0.2
 langchain-text-splitters>=0.0.1
 langchain-core>=0.1.17
+langgraph>=0.0.40  # Agregado - necesario para tu agent.py
 
 # Language models
 openai>=1.10.0
@@ -16,7 +17,7 @@ groq>=0.4.0
 sentence-transformers>=2.2.2
 
 # Audio processing
-fastrtc>=0.6.0
+fastrtc>=0.0.25
 elevenlabs>=0.2.24
 numpy>=1.24.0
 

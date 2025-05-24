@@ -10,12 +10,35 @@ from utils.classes import Order
 
 from supabase_client import SupabaseOrderManager
 import asyncio
+import os
+from dotenv import load_dotenv
 
-try:
-    supabase = SupabaseOrderManager()
-except Exception as e:
-    log_error(f"Error al inicializar el cliente de Supabase: {e}")
-    supabase = None
+# Cargar variables de entorno
+load_dotenv()
+
+# Intentar inicializar Supabase de forma segura
+def init_supabase_client():
+    """Inicializa el cliente de Supabase de forma segura."""
+    try:
+        # Verificar si las variables de entorno están disponibles
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_key = os.getenv("SUPABASE_KEY")
+        
+        if not supabase_url or not supabase_key:
+            log_warn("Variables de entorno de Supabase no encontradas. Funcionando sin base de datos.")
+            return None
+            
+        supabase = SupabaseOrderManager()
+        log_info("Cliente de Supabase inicializado correctamente")
+        return supabase
+        
+    except Exception as e:
+        log_error(f"Error al inicializar el cliente de Supabase: {e}")
+        log_warn("Continuando sin funcionalidad de base de datos")
+        return None
+
+# Inicializar cliente
+supabase = init_supabase_client()
 
 
 def create_menu_info_tool(retriever: VectorStoreRetriever) -> Tool:
@@ -52,19 +75,19 @@ def create_menu_info_tool(retriever: VectorStoreRetriever) -> Tool:
             return "Lo siento, no tengo información sobre eso."
     
     return Tool(
-    name="guest_info_tool",
-    description="""Herramienta para consultar información detallada del menú del restaurante.
-        Úsala cuando necesites:
-        - Buscar platos específicos y verificar su disponibilidad
-        - Consultar precios exactos de productos
-        - Obtener información sobre ingredientes, alérgenos o composición de platos
-        - Explorar secciones del menú (entrantes, principales, postres, bebidas, etc.)
-        - Verificar la existencia de productos antes de recomendarlos
-        - Responder preguntas específicas sobre la carta del restaurante
-        
-        Esta herramienta accede al contenido completo del menú para proporcionar información precisa y actualizada.""",
-    func=extract_text,
-)
+        name="guest_info_tool",
+        description="""Herramienta para consultar información detallada del menú del restaurante.
+            Úsala cuando necesites:
+            - Buscar platos específicos y verificar su disponibilidad
+            - Consultar precios exactos de productos
+            - Obtener información sobre ingredientes, alérgenos o composición de platos
+            - Explorar secciones del menú (entrantes, principales, postres, bebidas, etc.)
+            - Verificar la existencia de productos antes de recomendarlos
+            - Responder preguntas específicas sobre la carta del restaurante
+            
+            Esta herramienta accede al contenido completo del menú para proporcionar información precisa y actualizada.""",
+        func=extract_text,
+    )
 
 def create_send_to_kitchen_tool(llm: ChatOpenAI) -> Tool:
     """
@@ -167,6 +190,28 @@ def create_send_to_kitchen_tool(llm: ChatOpenAI) -> Tool:
             log_info(f"Procesando resumen para enviar pedido a cocina...")
             log_debug(f"Resumen recibido: {conversation_summary}")
             
+            # Verificar si Supabase está disponible
+            if supabase is None:
+                log_warn("Supabase no está configurado. Simulando envío de pedido.")
+                
+                # Extraer el pedido para mostrarlo en logs aunque no se envíe
+                order = extract_order_from_summary(conversation_summary)
+                
+                # Verificar si hay un error en el procesamiento
+                if hasattr(order, 'error') and order.error:
+                    return "Lo siento, ha ocurrido un problema al procesar su pedido. Por favor, inténtelo de nuevo."
+                
+                # Verificar si hay elementos en el pedido
+                if not order.items:
+                    return "No se pudo identificar ningún artículo en el pedido. ¿Podría repetir su pedido, por favor?"
+                
+                # Simular el procesamiento del pedido
+                order_dict = order.to_dict()
+                log_info(f"PEDIDO PROCESADO (MODO SIMULACIÓN): {json.dumps(order_dict, indent=2, ensure_ascii=False)}")
+                
+                # Devolver confirmación simulada
+                return f"Su pedido ha sido procesado correctamente. Mesa: {order.table_number}, Artículos: {len(order.items)} elemento(s). (Modo simulación - Supabase no configurado)"
+            
             # Extraer el pedido a partir del resumen
             order = extract_order_from_summary(conversation_summary)
             
@@ -187,12 +232,11 @@ def create_send_to_kitchen_tool(llm: ChatOpenAI) -> Tool:
                 log_warn("No se identificaron artículos en el pedido")
                 return "No se pudo identificar ningún artículo en el pedido. ¿Podría repetir su pedido, por favor?"
             
-            # Simular envío a la cocina
+            # Enviar a la cocina usando Supabase
             order_dict = order.to_dict()
             log_info(f"ENVIANDO PEDIDO A COCINA: {json.dumps(order_dict, indent=2, ensure_ascii=False)}")
             
-            # Aquí iría la integración real con el sistema de la cocina
-            # Por ejemplo, enviar a una API, base de datos, etc.
+            # Envío real con Supabase
             async def async_send_and_get_result(order):
                 return await supabase.send_order(order)
             
@@ -211,16 +255,32 @@ def create_send_to_kitchen_tool(llm: ChatOpenAI) -> Tool:
             log_debug(traceback.format_exc())
             return "Lo siento, hubo un problema al procesar su pedido. ¿Podría intentarlo de nuevo?"
     
-    # Retornar la herramienta configurada con la función send_to_kitchen
-    return Tool(
-        name="send_to_kitchen_tool",
-        description="""
+    # Determinar la descripción basada en si Supabase está disponible
+    if supabase is None:
+        description = """
+        Procesa y confirma el pedido del cliente (MODO SIMULACIÓN - Sin base de datos).
+        
+        Usa esta herramienta SOLAMENTE cuando el cliente haya terminado de hacer su pedido 
+        completo y esté listo para confirmarlo.
+        
+        NOTA: Supabase no está configurado, por lo que el pedido será procesado pero no se 
+        enviará a una base de datos real.
+        
+        Esta herramienta espera recibir un RESUMEN de la conversación que describe los elementos del pedido.
+        """
+    else:
+        description = """
         Envía el pedido completo a la cocina. Usa esta herramienta SOLAMENTE cuando el cliente haya terminado de hacer su pedido 
         completo y esté listo para enviarlo.
         
         Esta herramienta espera recibir un RESUMEN de la conversación que describe los elementos del pedido.
         No envíes la conversación completa, solo un resumen claro de lo que el cliente ha pedido, la mesa, 
         y cualquier instrucción especial relevante.
-        """,
+        """
+    
+    # Retornar la herramienta configurada con la función send_to_kitchen
+    return Tool(
+        name="send_to_kitchen_tool",
+        description=description,
         func=send_to_kitchen,
     )
