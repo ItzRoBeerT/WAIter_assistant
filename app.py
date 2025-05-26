@@ -3,7 +3,6 @@ from os import getenv, environ
 from dotenv import load_dotenv
 import os
 from model import ModelManager
-from utils.functions import fetch_openrouter_models
 # Configurar la variable de entorno para evitar advertencias de tokenizers (huggingface opcional)
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
  
@@ -28,7 +27,7 @@ from utils.logger import log_info, log_warn, log_error, log_success, log_debug
 load_dotenv()
 
 # Constantes
-RESTAURANT = "Bar paco"
+RESTAURANT = "Restautante"
 
 # Initialize clients and models to None, will be set during runtime
 groq_client = None
@@ -45,8 +44,7 @@ with open(md_path, "r", encoding="utf-8") as file:
 splitter = MarkdownHeaderTextSplitter(
     headers_to_split_on=[
         ("#", "seccion_principal"),
-        ("##", "subseccion"),
-        ("###", "apartado")
+        ("##", "categoria"),
     ], 
     strip_headers=False)
 splits = splitter.split_text(md_content)
@@ -312,17 +310,6 @@ async def response(audio: tuple[int, np.ndarray], history, openrouter_key, groq_
       
         yield np.array([]).astype(np.int16).tobytes()
         yield AdditionalOutputs(current_history + [{"role": "assistant", "content": f"Error: {str(e)}"}])
-
-def load_model_ids():
-    # Use asyncio to run the async function
-    try:
-        models = asyncio.run(fetch_openrouter_models())
-        # Extract model IDs and names
-        model_ids = [model["id"] for model in models]
-        return model_ids
-    except Exception as e:
-        log_error(f"Error loading model IDs: {e}")
-        return ["openai/gpt-4o-mini", "google/gemini-2.5-flash-preview", "anthropic/claude-3-5-sonnet"]  # Fallback models
 # endregion
 
 with gr.Blocks() as demo:
@@ -360,9 +347,7 @@ with gr.Blocks() as demo:
     with gr.Row():
         model_dropdown = gr.Dropdown(
             label="Select Model",
-            choices=load_model_ids(),
-            value=getenv("MODEL") or "openai/gpt-4o-mini",
-            interactive=True
+            choices=["google/gemini-2.5-flash-preview-05-20"],
         )
 
         text_input = gr.Textbox(
