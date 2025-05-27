@@ -12,7 +12,7 @@ from supabase_client import SupabaseOrderManager
 import asyncio
 import os
 from dotenv import load_dotenv
-import re # Asegúrate de importar re
+import re
 
 # Cargar variables de entorno
 load_dotenv()

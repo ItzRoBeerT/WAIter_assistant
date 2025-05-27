@@ -1,7 +1,8 @@
 import gradio as gr
-from os import getenv, environ
+from os import getenv
 from dotenv import load_dotenv
 import os
+import re
 from model import ModelManager
 # Configurar la variable de entorno para evitar advertencias de tokenizers (huggingface opcional)
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -56,6 +57,8 @@ guest_info_tool = None
 send_to_kitchen_tool = None
 tools = None
 
+
+# region FUNCTIONS
 # Function to initialize all components with provided API keys
 def initialize_components(openrouter_key, groq_key, elevenlabs_key, model_name):
     global groq_client, eleven_client, llm, waiter_agent, guest_info_tool, send_to_kitchen_tool, tools
@@ -101,7 +104,13 @@ def initialize_components(openrouter_key, groq_key, elevenlabs_key, model_name):
         "agent": waiter_agent is not None
     }
 
-# region FUNCTIONS
+def extract_user_response(assistant_text):
+    """Extrae solo la respuesta del usuario, eliminando el bloque <think>"""
+    # Buscar el patrón </think> y extraer todo lo que viene después
+    think_pattern = r'<think>.*?</think>\s*'
+    user_response = re.sub(think_pattern, '', assistant_text, flags=re.DOTALL)
+    return user_response.strip()
+
 async def handle_text_input(message, history, openrouter_key, groq_key, elevenlabs_key, model_name):
     """Handles text input, generates response, updates chat history."""
     global waiter_agent, llm
@@ -156,8 +165,12 @@ async def handle_text_input(message, history, openrouter_key, groq_key, elevenla
 
         log_info(f"Assistant text: '{assistant_text}'")
 
-        # 3. Actualizar el historial con el mensaje del asistente
-        assistant_message = {"role": "assistant", "content": assistant_text}
+        # Extraer solo la respuesta del usuario 
+        user_visible_response = extract_user_response(assistant_text)
+        log_info(f"User visible response: '{user_visible_response}'")
+
+        # 3. Actualizar el historial con el mensaje del asistente (solo la parte visible)
+        assistant_message = {"role": "assistant", "content": user_visible_response}
         final_history = history_with_user + [assistant_message]
         
         log_success("Tarea completada con éxito.")
@@ -244,16 +257,18 @@ async def response(audio: tuple[int, np.ndarray], history, openrouter_key, groq_
             assistant_text = "Lo siento, no sé cómo responder a eso."
 
         log_info(f"Assistant text: '{assistant_text}'")
+        user_visible_response = extract_user_response(assistant_text)
+        log_info(f"User visible response: '{user_visible_response}'")
 
         # 5. Actualizar el historial con el mensaje del asistente
-        assistant_message = {"role": "assistant", "content": assistant_text}
+        assistant_message = {"role": "assistant", "content": user_visible_response}
         final_history = history_with_user + [assistant_message]
 
         # 6. Generar la respuesta de voz
         log_info("Generating TTS...")
         TARGET_SAMPLE_RATE = 24000 # <<< --- Tasa de muestreo deseada
         tts_stream_generator = eleven_client.text_to_speech.convert(
-                text=assistant_text,
+                text=user_visible_response,
                 voice_id="Nh2zY9kknu6z4pZy6FhD",
                 model_id="eleven_flash_v2_5",
                 output_format="pcm_24000",
@@ -310,6 +325,7 @@ async def response(audio: tuple[int, np.ndarray], history, openrouter_key, groq_
 
 with gr.Blocks() as demo:
     gr.Markdown("# WAIter Chatbot")
+    gr.Markdown("See your order being uploaded [here](https://kitchen-dashboard-seven.vercel.app/)")
     with gr.Row():
         text_openrouter_api_key = gr.Textbox(
             label="OpenRouter API Key (required)",
