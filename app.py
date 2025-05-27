@@ -26,9 +26,6 @@ from utils.logger import log_info, log_warn, log_error, log_success, log_debug
 
 load_dotenv()
 
-# Constantes
-RESTAURANT = "Restautante"
-
 # Initialize clients and models to None, will be set during runtime
 groq_client = None
 eleven_client = None
@@ -90,7 +87,6 @@ def initialize_components(openrouter_key, groq_key, elevenlabs_key, model_name):
         # Initialize the agent
         waiter_agent = RestaurantAgent(
             llm=llm,
-            restaurant_name=RESTAURANT,
             tools=tools
         )
         
