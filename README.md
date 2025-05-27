@@ -416,7 +416,7 @@ To adapt WAIter to other languages:
 
 ## 📄 License
 
-This project is under the MIT License. See the `LICENSE` file for more details.
+This project is under the MIT License. See the `LICENSE` file for more details or clicking [here](/LICENSE).
 
 ---
 
