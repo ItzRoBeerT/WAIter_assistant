@@ -435,9 +435,8 @@ This project is under the MIT License. See the `LICENSE` file for more details.
 ## 👨‍💻 Author
 
 **Roberto** - Lead Developer
-- 🌐 **Web:** [Author information]
-- 📧 **Email:** [Author email]
-- 🐦 **Twitter:** [Author twitter]
+- 📧 **Email:** [robertocaravaca436@gmail.com]
+- 🐦 **Twitter:** [http://x.com/ItzRoBeerT]
 
 ---
 
